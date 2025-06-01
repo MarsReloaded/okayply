@@ -527,7 +527,7 @@ namespace okayply {
 		for (std::size_t i = 0; i < order_.size(); i++) {
 			auto& e = elements_[order_[i]];
 			if(fmt == format::ascii)
-				e.read<format::ascii, std::endian::native>(in);
+				e.read<format::ascii>(in);
 			else {
 				if (endian == std::endian::little)
 					e.read<format::binary, std::endian::little>(in);
@@ -540,12 +540,12 @@ namespace okayply {
 	template<format ff, std::endian ee>
 	void root::write(std::string const& path) const {
 		std::ofstream out(path, std::ios::binary | std::ios::trunc | std::ios::out);
-		write(out);
+		write<ff, ee>(out);
 	}
 
 	std::string root::str() const {
 		std::ostringstream out;
-		write(out);
+		write<format::ascii>(out);
 		return out.str();
 	}
 
