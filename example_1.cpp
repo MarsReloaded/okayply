@@ -50,7 +50,7 @@ int main()
 			x[11] = -1; y[11] = 1; z[11] = -1, nx[11] = -0.5773503f; ny[11] = 0.5773503f, nz[11] = -0.5773503f; s[11] = 0.125f; t[11] = 0.50f;
 			x[12] = 1; y[12] = 1; z[12] = -1, nx[12] = 0.5773503f; ny[12] = 0.5773503f, nz[12] = -0.5773503f; s[12] = 0.375f; t[12] = 0.50f;
 			x[13] = -1; y[13] = -1; z[13] = -1, nx[13] = -0.5773503f; ny[13] = -0.5773503f, nz[13] = -0.5773503f; s[13] = 0.125f; t[13] = 0.75f;
-			auto vi = faces("vertex_indices").get<std::vector<std::uint8_t>>();
+			auto vi = faces("vertex_indices").get<std::vector<int>>();
 			vi[0].push_back(0); vi[0].push_back(1); vi[0].push_back(2); vi[0].push_back(3);
 			vi[1].push_back(4); vi[1].push_back(3); vi[1].push_back(5); vi[1].push_back(6);
 			vi[2].push_back(7); vi[2].push_back(8); vi[2].push_back(9); vi[2].push_back(10);
@@ -73,11 +73,12 @@ int main()
 			ply2.read("outASC.ply");
 			std::cout << "\n" << ply2.str() << "\n";
 			ply2.read("outBINBE.ply");
-			std::cout << "\n" << ply2.str() << "\n";
+			std::cout << "\n" << ply2.str() << "\n"; // will display ascii in the console because root.str() is always ascii
 			ply2.read("outBINLE.ply");
+			std::cout << "\n" << ply2.str() << "\n"; // will display ascii in the console because root.str() is always ascii
 
 			// Access all elements & properties without bloat.
-			for (auto& eref : ply.elements()) {
+			for (auto& eref : ply2.elements()) {
 				auto& e = eref.get();
 				std::cout << "\nELEMENT\n";
 				std::cout << "name: " << e.name() << ", ptr: " << &e << ", size: " << e.size() << "\n";
@@ -93,15 +94,15 @@ int main()
 							std::cout << x << " ";
 						std::cout << "\n";
 					}
-					else if (p.type() == typeid(std::uint8_t))
+					else if (p.listType() == typeid(std::vector<int>))
 					{
-						auto data = p.get<std::vector<std::uint8_t>>();
+						auto data = p.get<std::vector<int>>();
 						std::cout << "name: " << p.name() << ", ptr: " << &p << ", type: " <<
 							p.type().name() << ", list: " << (p.isList() ? "true" : "false") <<
 							", listType: " << p.listType().name() << "\n";
 						for (auto& x : data) {
 							for (auto& y : x)
-								std::cout << static_cast<int>(y) << " ";
+								std::cout << y << " ";
 							std::cout << "\n";
 						}
 						std::cout << "\n";
