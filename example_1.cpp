@@ -3,12 +3,14 @@
 #include <okayply.h>
 #include <iostream>
 
+#define Example 2
+
+#if Example == 1
+
 int main()
 {
 	try {
-
 		okayply::root ply;
-
 		{
 			// Add element "vertex" with size 14
 			auto& vertices = ply("vertex", 14);
@@ -59,9 +61,13 @@ int main()
 			vi[5].push_back(10); vi[5].push_back(9); vi[5].push_back(0); vi[5].push_back(12);
 		}
 
+		// we dont need s and t, delete them.
+		ply("vertex").del("s");
+		ply("vertex").del("t");
+
 		// example ASCII output into console
 		std::cout << "\n" << ply.str() << "\n";
-		
+
 		// Write some files
 		ply.write<okayply::format::ascii>("outASC.ply");
 		ply.write<okayply::format::binary, std::endian::little>("outBINLE.ply");
@@ -115,5 +121,48 @@ int main()
 	catch (std::exception& e) {
 		std::cout << e.what();
 	}
-
+	return EXIT_SUCCESS;
 }
+
+#endif
+
+#if Example == 2
+int main() {
+	try {
+		// same as example 1 but compact
+		okayply::root ply;
+		{
+			auto& vertices = ply("vertex", 14);
+			auto& faces = ply("face", 6);
+			auto const n = 0.5773503f;
+			std::vector<float> xPositions = { 1, -1, -1,  1,  1, -1, -1, -1, -1, -1, -1, -1,  1, -1 };
+			std::vector<float> xNormal = { n, -n, -n,  n,  n, -n, -n, -n, -n, -n, -n, -n,  n, -n };
+			std::vector<float> yPositions = { 1,  1, -1, -1, -1, -1, -1, -1, -1,  1,  1,  1,  1, -1 };
+			std::vector<float> yNormal = { n,  n, -n, -n, -n, -n, -n, -n, -n,  n,  n,  n,  n, -n };
+			std::vector<float> zPositions = { 1,  1,  1,  1, -1,  1, -1, -1,  1,  1, -1, -1, -1, -1 };
+			std::vector<float> zNormal = { n,  n,  n,  n, -n,  n, -n, -n,  n,  n, -n, -n, -n, -n };
+			vertices("x").set(xPositions);
+			vertices("y").set(yPositions);
+			vertices("z").set(zPositions);
+			vertices("nx").set(xNormal);
+			vertices("ny").set(yNormal);
+			vertices("nz").set(zNormal);
+			std::vector<std::vector<int>> vertexIndices = {
+				{ 0,  1, 2,  3},
+				{ 4,  3, 5,  6},
+				{ 7,  8, 9, 10},
+				{11, 12, 4, 13},
+				{12,  0, 3, 4},
+				{10,  9, 0, 12}
+			};
+			faces("vertex_indices").set(vertexIndices);
+		}
+		std::cout << "\n" << ply.str() << "\n";
+		ply.write("test.ply");
+	}
+	catch (std::exception& e) {
+		std::cout << e.what();
+	}
+	return EXIT_SUCCESS;
+}
+#endif
