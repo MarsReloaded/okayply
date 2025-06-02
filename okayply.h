@@ -30,6 +30,8 @@
 #include <span>
 #include <any>
 
+#include <cerrno>
+
 #define USE_CRLF_LFCR_HEADER_HACK
 
 namespace okayply {
@@ -74,6 +76,7 @@ namespace okayply {
 			inline constexpr auto lf = '\n'; // definition says: use \r but most implementations use \n
 			inline constexpr auto space = ' ';
 			inline constexpr auto invalidSymbols = "\n\v\f\r"; // do not use these in comments or names
+			inline constexpr auto ignoreLineSymbols = "{#;~([|"; // everything after these symbols will be ignored when reading the header
 			inline constexpr auto f32fmt = "{:.9}";
 			inline constexpr auto f64fmt = "{:.17}";
 		}
@@ -141,22 +144,26 @@ namespace okayply {
 			// and without leading and trailing whitespace
 			// and without empty lines
 			// and with tracking of \r and \n usage
-			std::uint32_t result = 0;
+			std::uint32_t crlf = 0;
 			line.clear();
+			auto sanitize = [&c, &line, &crlf]() {
+				crlf += c == str::cr ? 0x00010000 : 0x00000001; // track how often cr and lf are used
+				std::size_t start = 0;
+				while (start < line.size() && line[start] == str::space) start++;
+				std::size_t end = std::min(line.find_first_of(str::ignoreLineSymbols), line.size());
+				while (end > start && line[end - 1] == str::space) end--;
+				line = line.substr(start, end - start);
+			};
 			while (in.get(c)) {
 				if (c == str::cr || c == str::lf) {
-					result += c == str::cr ? 0x00010000 : 0x00000001; // track how often cr and lf are used
-					std::size_t start = 0;
-					while (start < line.size() && line[start] == str::space) start++;
-					std::size_t end = line.size();
-					while (end > start && line[end-1] == str::space) end--;
-					line = line.substr(start, end - start);
+					sanitize();
 					if (!line.size()) continue;
-					return result;
+					return crlf;
 				}
 				line += c;
 			}
-			return 0;
+			sanitize();
+			return crlf;
 		}
 		inline vec<std::string> split(std::string const& s, char delim) {
 			vec<std::string> r;
@@ -474,6 +481,8 @@ namespace okayply {
 
 	void root::read(std::string const& path) {
 		std::ifstream in(path, std::ios::binary | std::ios::in);
+		if (!in.good())
+			throw std::runtime_error(std::format("cannot open file in read mode: \"{}\"", path));
 		read(in);
 	}
 
@@ -499,7 +508,7 @@ namespace okayply {
 			}
 			else if (lIdx == 1) {
 				auto a = split(line, str::space);
-				if(a.size() != 3 || a[0] != str::format)
+				if(a.size() < 3 || a[0] != str::format)
 					throw std::runtime_error(std::format("read line {}: invalid", lIdx));
 				if (a[1] == str::ascii)
 					fmt = format::ascii;
@@ -524,7 +533,7 @@ namespace okayply {
 				case 'c': { // comment ...
 					if (a[0] != str::comment)
 						throw std::runtime_error(std::format("read line {}: invalid", lIdx));
-					comments_.push_back(line.substr(a[0].size()));
+					comments_.push_back(line.substr(a[0].size() + 1));
 				} break;
 				case 'e': { // element name size
 					if (a[0] != str::elem)
@@ -564,11 +573,22 @@ namespace okayply {
 			if (lastDecodedChar == str::lf && in.peek() == str::cr) in.get();
 		}
 #endif
-		for (std::size_t i = 0; i < order_.size(); i++) {
-			auto& e = elements_[order_[i]];
-			if(fmt == format::ascii)
-				e.read<format::ascii>(in);
-			else {
+		if (fmt == format::ascii) {
+			std::stringstream ss;
+			line.clear();
+			while (true) { // ascii can hold a lot of garbage... better sanitize it.
+				crlfCounter += getline(in, line, lastDecodedChar);
+				if (!line.size()) break;
+				ss << line << linesep_;
+			}
+			for (std::size_t i = 0; i < order_.size(); i++) {
+				auto& e = elements_[order_[i]];
+				e.read<format::ascii>(ss);
+			}
+		}
+		else {
+			for (std::size_t i = 0; i < order_.size(); i++) {
+				auto& e = elements_[order_[i]];
 				if (endian == std::endian::little)
 					e.read<format::binary, std::endian::little>(in);
 				else
@@ -580,6 +600,8 @@ namespace okayply {
 	template<format ff, std::endian ee>
 	void root::write(std::string const& path) const {
 		std::ofstream out(path, std::ios::binary | std::ios::trunc | std::ios::out);
+		if (!out.good())
+			throw std::runtime_error(std::format("Cannot open file in write mode \"{}\"", path));
 		write<ff, ee>(out);
 	}
 
@@ -592,10 +614,10 @@ namespace okayply {
 	template<format ff, std::endian ee>
 	void root::write(std::ostream& out) const {
 		out << str::ply << linesep_;
+		out << str::format << " " << formatName<ff, ee>() << " " << str::version << linesep_;
 		for (auto const& c : comments_)
 			if (c.find_first_of(str::invalidSymbols) == std::string::npos) // filter all the illegal stuff
 				out << str::comment << " " << c << linesep_;
-		out << str::format << " " << formatName<ff, ee>() << " " << str::version << linesep_;
 		auto ne = order_.size();
 		for (std::size_t i = 0; i < ne; i++)
 		{
@@ -652,7 +674,7 @@ namespace okayply {
 			}
 		}
 		template<typename T, bool isList>
-		struct io_x : public type {
+		struct type_x : public type {
 			void ascI(std::istream& in, void* ptr, std::size_t i) const override {
 				if constexpr (isList) {
 					auto& vv = *reinterpret_cast<vec<vec<T>>*>(ptr);
@@ -672,7 +694,13 @@ namespace okayply {
 				}
 				else if constexpr (!isList) {
 					auto& v = *reinterpret_cast<vec<T>*>(ptr);
-					in >> v[i];
+					if constexpr (sizeof(T) == 1) {
+						std::size_t size;
+						in >> size;
+						v[i] = static_cast<T>(size);
+					} 
+					else
+						in >> v[i];
 				}
 			}
 			void ascO(std::ostream& out, const void* ptr, std::size_t i) const override {
@@ -755,14 +783,14 @@ namespace okayply {
 	}
 
 	root::root() { // load default (ply 1.0) datatypes on construction.
-		registerType<float, io_x>();
-		registerType<double, io_x>();
-		registerType<std::int8_t, io_x>();
-		registerType<std::uint8_t, io_x>();
-		registerType<std::int16_t, io_x>();
-		registerType<std::uint16_t, io_x>();
-		registerType<std::int32_t, io_x>();
-		registerType<std::uint32_t, io_x>();
+		registerType<float, type_x>();
+		registerType<double, type_x>();
+		registerType<std::int8_t, type_x>();
+		registerType<std::uint8_t, type_x>();
+		registerType<std::int16_t, type_x>();
+		registerType<std::uint16_t, type_x>();
+		registerType<std::int32_t, type_x>();
+		registerType<std::uint32_t, type_x>();
 	}
 
 }
