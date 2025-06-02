@@ -8,12 +8,12 @@
 // 
 // license: UNLICENSED
 // 
-// Copyright(C) 2025 MarcusTU
+// Copyright(C) 2025 MarsReloaded
 // 
 // This file is part of the okayply project.
 // 
 // The okayply project cannot be copied, modified and/or distributed
-// without the express permission of MarcusTU. You are allowed to
+// without the express permission of MarsReloaded. You are allowed to
 // admire the code though.
 // 
 // ----------------------------------------------
