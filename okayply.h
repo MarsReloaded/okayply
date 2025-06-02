@@ -30,8 +30,6 @@
 #include <span>
 #include <any>
 
-#include <cerrno>
-
 #define USE_CRLF_LFCR_HEADER_HACK
 
 namespace okayply {
