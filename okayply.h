@@ -35,10 +35,10 @@
 namespace okayply {
 
 	enum class format : std::uint8_t { ascii, binary };
-	struct property;
-	struct element;
+	struct prop;
+	struct elem;
 	struct root;
-	struct io;
+	struct type;
 
 	namespace {
 		template<typename T> using vec = std::vector<T>;
@@ -59,8 +59,8 @@ namespace okayply {
 			inline constexpr auto t_float32 = "float32";
 			inline constexpr auto t_double = "double";
 			inline constexpr auto t_float64 = "float64";
-			inline constexpr auto element = "element";
-			inline constexpr auto property = "property";
+			inline constexpr auto elem = "element";
+			inline constexpr auto prop = "property";
 			inline constexpr auto list = "list";
 			inline constexpr auto comment = "comment";
 			inline constexpr auto ply = "ply";
@@ -172,7 +172,7 @@ namespace okayply {
 	// template<typename T, bool isList> struct CustomIO : public IO
 	// and registerType<type, CustomIO>();
 	// see IO_X later in the code.
-	struct io {
+	struct type {
 		// Serialize & Deserialize
 		virtual void ascI(std::istream&, void*, std::size_t) const = 0;
 		virtual void ascO(std::ostream&, const void*, std::size_t) const = 0;
@@ -183,55 +183,58 @@ namespace okayply {
 		virtual vec<std::string_view> names() const = 0;
 
 		// Dont touch
-		virtual ~io() = default;
+		virtual ~type() = default;
 	};
 
-	struct property
+	struct prop
 	{
-		friend root;
-		friend element;
+		friend root; // friends are nice.
+		friend elem;
 		std::size_t size() const; // how many datapoints are in the property?
 		std::string_view name() const; // whats my name?
 		template<typename T> std::span<T> get(); // mutable data access
+		template<typename T> void set(std::span<T const>); // set data
+		template<typename T> void set(std::vector<T> const&); // set data
 		std::type_index type() const; // gets the type of the property
 		std::type_index listType() const; // for lists, this is vec<type>, for non lists, this is equal to type()
 		bool isList() const; // is true if the property is a property list
 	private:
 		std::any any_;
-		element* parent_ = nullptr;
+		elem* parent_ = nullptr;
 		std::type_index tid_ = typeid(void);
 		std::uint8_t listIndexSize_ = 0; // only used when reading files
 	};
 
-	struct element
+	struct elem
 	{
 		friend root;
-		friend property;
-		property& operator()(std::string_view, std::type_index const&); // full initialisation
-		property& operator()(std::string_view); // partial initialisation (full after first Property.get<T>())
+		friend prop;
+		prop& operator()(std::string_view, std::type_index const&); // full initialisation
+		prop& operator()(std::string_view); // partial initialisation (full after first Property.get<T>())
 		std::size_t size() const;
 		std::string_view name() const;
-		vec<std::reference_wrapper<property>> properties();
+		vec<std::reference_wrapper<prop>> properties();
+		void del(std::string_view);
 	private:
 		template<format ff = format::ascii, std::endian ee = std::endian::native>
 		void read(std::istream&);
 		template<format ff = format::ascii, std::endian ee = std::endian::native>
 		void write(std::ostream&) const;
-		std::unordered_map<const property*, std::string> names_;
+		std::unordered_map<const prop*, std::string> names_;
 		vec<std::string> order_;
 		root* parent_ = nullptr;
-		std::unordered_map<std::string, property> properties_;
+		std::unordered_map<std::string, prop> properties_;
 		std::size_t size_ = 0;
 	};
 
 	struct root
 	{
-		friend element;
-		friend property;
+		friend elem;
+		friend prop;
 		root();
-		element& operator()(std::string_view, std::size_t); // full init
-		element& operator()(std::string_view); // partial init
-		element const& operator()(std::string_view) const;
+		elem& operator()(std::string_view, std::size_t); // full init
+		elem& operator()(std::string_view); // partial init?
+		elem const& operator()(std::string_view) const;
 		vec<std::string>& comments();
 		void read(std::istream&);
 		void read(std::string const&);
@@ -242,15 +245,16 @@ namespace okayply {
 		void write(std::string const&) const;
 		std::string str() const;
 		char lineSeperator(char);
-		vec<std::reference_wrapper<element>> elements();
+		vec<std::reference_wrapper<elem>> elements();
+		void del(std::string_view);
 	private:
 		std::type_index typeidFromStr(std::string_view, bool);
 		std::unordered_map<std::type_index, std::function<std::any(std::size_t)>> anyvec_;
 		vec<std::string> comments_;
-		std::unordered_map<std::string, element> elements_;
+		std::unordered_map<std::string, elem> elements_;
 		std::unordered_map<std::type_index, std::unique_ptr<InfoBase>> info_;
-		std::unordered_map<std::type_index, std::unique_ptr<io>> ios_;
-		std::unordered_map<const element*, std::string> names_;
+		std::unordered_map<std::type_index, std::unique_ptr<type>> ios_;
+		std::unordered_map<const elem*, std::string> names_;
 		vec<std::string> order_;
 		char linesep_ = str::lf;
 	};
@@ -259,16 +263,16 @@ namespace okayply {
 	// Property
 	// ---------------------------------------------------------------
 
-	vec<std::reference_wrapper<property>> element::properties() {
-		vec<std::reference_wrapper<property>> info;
+	vec<std::reference_wrapper<prop>> elem::properties() {
+		vec<std::reference_wrapper<prop>> info;
 		for (auto& [n, p] : properties_)
 			info.emplace_back(p);
 		return info;
 	}
 
-	std::size_t property::size() const { return parent_->size_; }
-	std::string_view property::name() const { return parent_->names_.at(this); }
-	template<typename T> std::span<T> property::get() {
+	std::size_t prop::size() const { return parent_->size_; }
+	std::string_view prop::name() const { return parent_->names_.at(this); }
+	template<typename T> std::span<T> prop::get() {
 		if (tid_ != typeid(T)) { // late initialization
 			if (tid_ == typeid(void)) {
 				tid_ = typeid(T);
@@ -281,9 +285,17 @@ namespace okayply {
 		}
 		return std::any_cast<vec<T> &>(any_);
 	}
-	std::type_index property::listType() const { return tid_; }
-	std::type_index property::type() const { return parent_->parent_->info_[tid_]->tid(); }
-	bool property::isList() const {
+	template<typename T> void prop::set(std::span<T const> src) {
+		auto dst = get<T>();
+		std::copy_n(src.begin(), src.size(), dst.begin());
+	}
+	template<typename T> void prop::set(std::vector<T> const & src) {
+		auto dst = get<T>();
+		std::copy_n(src.begin(), src.size(), dst.begin());
+	}
+	std::type_index prop::listType() const { return tid_; }
+	std::type_index prop::type() const { return parent_->parent_->info_[tid_]->tid(); }
+	bool prop::isList() const {
 		if (tid_ == typeid(void))
 			throw std::runtime_error("Property::isList cannot be used before type initialization");
 		return parent_->parent_->info_[tid_]->isList();
@@ -293,7 +305,7 @@ namespace okayply {
 	// Element
 	// ---------------------------------------------------------------
 
-	property& element::operator()(std::string_view name) {
+	prop& elem::operator()(std::string_view name) {
 		auto [it, inserted] = properties_.try_emplace(std::string(name));
 		if (inserted) {
 			order_.push_back(std::string(name));
@@ -303,7 +315,7 @@ namespace okayply {
 		return it->second;
 	}
 
-	property& element::operator()(std::string_view name, std::type_index const& tid) {
+	prop& elem::operator()(std::string_view name, std::type_index const& tid) {
 		if (!parent_->ios_.contains(tid))
 			throw std::runtime_error(std::format("No IO defined for type \"{}\"", tid.name()));
 		auto [it, inserted] = properties_.try_emplace(std::string(name));
@@ -317,13 +329,27 @@ namespace okayply {
 		return it->second;
 	}
 
-	std::size_t element::size() const { return size_; }
-	std::string_view element::name() const { return parent_->names_.at(this); }
+	std::size_t elem::size() const { return size_; }
+	std::string_view elem::name() const { return parent_->names_.at(this); }
+
+	void elem::del(std::string_view n) {
+		auto it = properties_.find(std::string(n));
+		if(it == properties_.end())
+			throw std::runtime_error(std::format("cannot delete something that does not exist element.{}", n));
+		names_.erase(&it->second);
+		properties_.erase(std::string(n));
+		for (std::size_t i = 0; i < order_.size(); i++) {
+			if (order_[i] == n) {
+				order_.erase(order_.begin() + i);
+				break;
+			}
+		}
+	}
 
 	template<format ff, std::endian ee>
-	void element::write(std::ostream& out) const {
+	void elem::write(std::ostream& out) const {
 		std::size_t np = order_.size();
-		vec<const io*> ios(np); // serializer & deserializer for each property
+		vec<const type*> ios(np); // serializer & deserializer for each property
 		vec<const void*> ptrs(np); // ptr on the vectors (NOT the data)
 		vec<std::uint8_t> lsiz(np); // list index type sizes
 		for (std::size_t pIdx = 0; pIdx < np; pIdx++) {
@@ -352,9 +378,9 @@ namespace okayply {
 	}
 
 	template<format ff, std::endian ee>
-	void element::read(std::istream& in) {
+	void elem::read(std::istream& in) {
 		std::size_t np = order_.size();
-		vec<const io*> ios(np); // serializer & deserializer for each property
+		vec<const type*> ios(np); // serializer & deserializer for each property
 		vec<void*> ptrs(np); // ptr on the vectors (NOT the data)
 		vec<std::uint8_t> lsiz(np); // list index type sizes
 		for (std::size_t pIdx = 0; pIdx < np; pIdx++) {
@@ -380,8 +406,22 @@ namespace okayply {
 	// Data
 	// ---------------------------------------------------------------
 
-	vec<std::reference_wrapper<element>> root::elements() {
-		vec<std::reference_wrapper<element>> info;
+	void root::del(std::string_view n) {
+		auto it = elements_.find(std::string(n));
+		if (it == elements_.end())
+			throw std::runtime_error(std::format("cannot delete something that does not exist root.{}", n));
+		names_.erase(&it->second);
+		elements_.erase(std::string(n));
+		for (std::size_t i = 0; i < order_.size(); i++) {
+			if (order_[i] == n) {
+				order_.erase(order_.begin() + i);
+				break;
+			}
+		}
+	}
+
+	vec<std::reference_wrapper<elem>> root::elements() {
+		vec<std::reference_wrapper<elem>> info;
 		for (auto& [n, e] : elements_)
 			info.emplace_back(e);
 		return info;
@@ -393,7 +433,7 @@ namespace okayply {
 	}
 
 	vec<std::string>& root::comments() { return comments_; }
-	element& root::operator()(std::string_view name, std::size_t size) {
+	elem& root::operator()(std::string_view name, std::size_t size) {
 		auto [it, inserted] = elements_.try_emplace(std::string(name));
 		if (inserted) {
 			order_.push_back(std::string(name));
@@ -403,13 +443,13 @@ namespace okayply {
 		}
 		return it->second;
 	}
-	element& root::operator()(std::string_view name) {
+	elem& root::operator()(std::string_view name) {
 		if (!elements_.contains(std::string(name)))
 			throw std::runtime_error("cannot access non initialized element");
 		// this could be partial initialization without size, but then the size needs to come from "somewhere"...
 		return elements_[std::string(name)];
 	}
-	element const& root::operator()(std::string_view name) const {
+	elem const& root::operator()(std::string_view name) const {
 		if (!elements_.contains(std::string(name)))
 			throw std::runtime_error("cannot access non initialized element");
 		// this could be partial initialization without size, but then the size needs to come from "somewhere"...
@@ -448,7 +488,7 @@ namespace okayply {
 		char lastDecodedChar;
 		format fmt = format::ascii;
 		std::endian endian = std::endian::native;
-		element* lastElement = nullptr;
+		elem* lastElement = nullptr;
 		while (true) {
 			crlfCounter += getline(in, line, lastDecodedChar);
 			if (!line.size() || line == str::end_header)
@@ -487,12 +527,12 @@ namespace okayply {
 					comments_.push_back(line.substr(a[0].size()));
 				} break;
 				case 'e': { // element name size
-					if (a[0] != str::element)
+					if (a[0] != str::elem)
 						throw std::runtime_error(std::format("read line {}: invalid", lIdx));
 					lastElement = &this->operator()(a[1], std::stoi(a[2]));
 				} break;
 				case 'p': { // property
-					if (a[0] != str::property)
+					if (a[0] != str::prop)
 						throw std::runtime_error(std::format("read line {}: invalid", lIdx));
 					if (a[1] == str::list) { // property list type type name
 						lastElement->operator()(a[4], typeidFromStr(a[3], true));
@@ -560,14 +600,14 @@ namespace okayply {
 		for (std::size_t i = 0; i < ne; i++)
 		{
 			auto const& e = elements_.at(order_[i]);
-			out << str::element << " " << e.name() << " " << e.size() << linesep_;
+			out << str::elem << " " << e.name() << " " << e.size() << linesep_;
 			for (auto const& pname : e.order_) {
 				auto const & p = e.properties_.at(pname);
-				auto const & io = *ios_.at(p.tid_).get();
+				auto const & type = *ios_.at(p.tid_).get();
 				auto const & info = *info_.at(p.tid_).get();
-				out << str::property << " ";
+				out << str::prop << " ";
 				if (info.isList()) out << str::list << " " << listIndexTypeName(info.listIndexTypeSize(p.any_)) << " ";
-				out << io.names()[0] << " " << p.name() << linesep_;
+				out << type.names()[0] << " " << p.name() << linesep_;
 			}
 		}
 		out << str::end_header << linesep_;
@@ -612,7 +652,7 @@ namespace okayply {
 			}
 		}
 		template<typename T, bool isList>
-		struct io_x : public io {
+		struct io_x : public type {
 			void ascI(std::istream& in, void* ptr, std::size_t i) const override {
 				if constexpr (isList) {
 					auto& vv = *reinterpret_cast<vec<vec<T>>*>(ptr);
