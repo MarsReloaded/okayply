@@ -18,6 +18,13 @@
 // 
 // ----------------------------------------------
 
+
+// ----------------------------------------------
+// TODO
+// -> composite types -> e.g. "normal" = "nx", "ny, "nz" as float
+// -> custom types    -> e.g. std::array<float, 3> -> property list uchar float name
+// -> better errors
+
 #include <unordered_map>
 #include <string_view>
 #include <functional>
@@ -42,6 +49,7 @@ namespace okayply {
 
 	namespace {
 		template<typename T> using vec = std::vector<T>;
+		template<typename T> using spa = std::span<T>;
 		namespace str {
 			inline constexpr auto t_char = "char";
 			inline constexpr auto t_int8 = "int8";
@@ -74,7 +82,7 @@ namespace okayply {
 			inline constexpr auto lf = '\n'; // definition says: use \r but most implementations use \n
 			inline constexpr auto space = ' ';
 			inline constexpr auto invalidSymbols = "\n\v\f\r"; // do not use these in comments or names
-			inline constexpr auto ignoreLineSymbols = "{#;~([|"; // everything after these symbols will be ignored when reading the header
+			inline constexpr auto ignoreLineSymbols = "{#;~([|"; // everything in a line after these symbols will be ignored when reading the header
 			inline constexpr auto f32fmt = "{:.9}";
 			inline constexpr auto f64fmt = "{:.17}";
 		}
@@ -101,6 +109,7 @@ namespace okayply {
 		struct InfoBase {
 			virtual bool isList() const = 0;
 			virtual std::type_index tid() const = 0;
+			virtual std::size_t typeSize() const = 0;
 			virtual std::type_index listTid() const = 0;
 			virtual std::uint8_t listIndexTypeSize(std::any const & any) const = 0;
 			virtual void* ptr(std::any & any) const = 0;
@@ -111,6 +120,7 @@ namespace okayply {
 		struct Info : public InfoBase {
 			std::type_index listTid() const override { return typeid(vec<T>); }
 			std::type_index tid() const override { return typeid(T); }
+			std::size_t typeSize() const override { return sizeof(T); }
 			bool isList() const override { return l; }
 			std::uint8_t listIndexTypeSize(std::any const & any) const override {
 				if constexpr (l) {
@@ -187,7 +197,7 @@ namespace okayply {
 		// First name will be used when writing, all names are valid for reading
 		virtual vec<std::string_view> names() const = 0;
 
-		// Dont touch
+		// Do not touch
 		virtual ~type() = default;
 	};
 
@@ -197,12 +207,14 @@ namespace okayply {
 		friend elem;
 		std::size_t size() const; // how many datapoints are in the property?
 		std::string_view name() const; // whats my name?
-		template<typename T> std::span<T> get(); // mutable data access
-		template<typename T> void set(std::span<T const>); // set data
-		template<typename T> void set(std::vector<T> const&); // set data
+		template<typename T> spa<T> get(); // mutable data access
+		template<typename T> void set(spa<T const>); // set data
+		template<typename T> void set(vec<T> const&); // set data
 		std::type_index type() const; // gets the type of the property
 		std::type_index listType() const; // for lists, this is vec<type>, for non lists, this is equal to type()
 		bool isList() const; // is true if the property is a property list
+		void* rawPtr(); // start adress of data
+		std::size_t rawSize(); // data size in bytes
 	private:
 		std::any any_;
 		elem* parent_ = nullptr;
@@ -216,10 +228,11 @@ namespace okayply {
 		friend prop;
 		prop& operator()(std::string_view, std::type_index const&); // full initialisation
 		prop& operator()(std::string_view); // partial initialisation (full after first Property.get<T>())
-		std::size_t size() const;
-		std::string_view name() const;
-		vec<std::reference_wrapper<prop>> properties();
-		void del(std::string_view);
+		bool has(std::string_view); // check if property exists
+		std::size_t size() const; // get the number of elements
+		std::string_view name() const; // get the name of the element
+		vec<std::reference_wrapper<prop>> properties(); // get all the properties from this element
+		void del(std::string_view); // delete a property by name
 	private:
 		template<format ff = format::ascii, std::endian ee = std::endian::native>
 		void read(std::istream&);
@@ -238,20 +251,21 @@ namespace okayply {
 		friend prop;
 		root();
 		elem& operator()(std::string_view, std::size_t); // full init
-		elem& operator()(std::string_view); // partial init?
-		elem const& operator()(std::string_view) const;
-		vec<std::string>& comments();
-		void read(std::istream&);
-		void read(std::string const&);
-		template<typename T, template<typename, bool> typename CustomIO> void registerType();
+		elem& operator()(std::string_view); // access only after init
+		elem const& operator()(std::string_view) const; // const access
+		vec<std::string>& comments(); // get all the comments and manage them yourself
+		void read(std::istream&); // load a file (do not forget std::ios::binary!)
+		void read(std::string const&); // load a file
+		template<typename T, template<typename, bool> typename CustomIO> void registerType(); // add a custom datatype
 		template<format ff = format::ascii, std::endian ee = std::endian::native>
-		void write(std::ostream&) const;
+		void write(std::ostream&) const; // write a file
 		template<format ff = format::ascii, std::endian ee = std::endian::native>
-		void write(std::string const&) const;
-		std::string str() const;
-		char lineSeperator(char);
-		vec<std::reference_wrapper<elem>> elements();
-		void del(std::string_view);
+		void write(std::string const&) const; // write a file
+		std::string str() const; // get ascii representation of the ply
+		char lineSeperator(char); // old line seperator = lineSeperator(new line seperator)
+		vec<std::reference_wrapper<elem>> elements(); // get all the elements
+		void del(std::string_view); // delete an element by name
+		bool has(std::string_view); // check if element exists
 	private:
 		std::type_index typeidFromStr(std::string_view, bool);
 		std::unordered_map<std::type_index, std::function<std::any(std::size_t)>> anyvec_;
@@ -275,9 +289,19 @@ namespace okayply {
 		return info;
 	}
 
+	void* prop::rawPtr() {
+		auto& info = *parent_->parent_->info_[tid_].get();
+		return info.ptr(any_);
+	}
+
+	std::size_t prop::rawSize() {
+		auto& info = *parent_->parent_->info_[tid_].get();
+		return info.typeSize();
+	}
+
 	std::size_t prop::size() const { return parent_->size_; }
 	std::string_view prop::name() const { return parent_->names_.at(this); }
-	template<typename T> std::span<T> prop::get() {
+	template<typename T> spa<T> prop::get() {
 		if (tid_ != typeid(T)) { // late initialization
 			if (tid_ == typeid(void)) {
 				tid_ = typeid(T);
@@ -290,11 +314,11 @@ namespace okayply {
 		}
 		return std::any_cast<vec<T> &>(any_);
 	}
-	template<typename T> void prop::set(std::span<T const> src) {
+	template<typename T> void prop::set(spa<T const> src) {
 		auto dst = get<T>();
 		std::copy_n(src.begin(), src.size(), dst.begin());
 	}
-	template<typename T> void prop::set(std::vector<T> const & src) {
+	template<typename T> void prop::set(vec<T> const & src) {
 		auto dst = get<T>();
 		std::copy_n(src.begin(), src.size(), dst.begin());
 	}
@@ -309,6 +333,10 @@ namespace okayply {
 	// ---------------------------------------------------------------
 	// Element
 	// ---------------------------------------------------------------
+
+	bool elem::has(std::string_view sv) {
+		return properties_.contains(std::string(sv));
+	}
 
 	prop& elem::operator()(std::string_view name) {
 		auto [it, inserted] = properties_.try_emplace(std::string(name));
@@ -410,6 +438,10 @@ namespace okayply {
 	// ---------------------------------------------------------------
 	// Data
 	// ---------------------------------------------------------------
+
+	bool root::has(std::string_view sv) {
+		return elements_.contains(std::string(sv));
+	}
 
 	void root::del(std::string_view n) {
 		auto it = elements_.find(std::string(n));
@@ -553,7 +585,10 @@ namespace okayply {
 						lastElement->operator()(a[2], typeidFromStr(a[1], false));
 					}
 				} break;
-				default: throw std::runtime_error(std::format("read line {}: invalid", lIdx));
+				default: {
+					// warning might be sufficient, just ignore the line?
+					throw std::runtime_error(std::format("read line {}: invalid", lIdx));
+				}
 				}
 			}
 			lIdx++;
@@ -678,9 +713,11 @@ namespace okayply {
 					auto& vv = *reinterpret_cast<vec<vec<T>>*>(ptr);
 					if (!vv.size()) return;
 					auto& v = vv[i];
-					std::size_t size = 0;
+					std::int64_t size = 0;
+					if (size < 0)
+						throw std::runtime_error("Negative size for property list");
 					in >> size;
-					v.resize(size);
+					v.resize(static_cast<std::uint64_t>(size));
 					if constexpr(sizeof(T) == 1) {
 						for (auto& x : v) {
 							in >> size;
