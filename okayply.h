@@ -82,7 +82,7 @@ namespace okayply {
 			inline constexpr auto lf = '\n'; // definition says: use \r but most implementations use \n
 			inline constexpr auto space = ' ';
 			inline constexpr auto invalidSymbols = "\n\v\f\r"; // do not use these in comments or names
-			inline constexpr auto ignoreLineSymbols = "{#;~([|"; // everything in a line after these symbols will be ignored when reading the header
+			inline constexpr auto ignoreLineSymbols = "{#;~([|"; // everything in a line after these symbols will be ignored when reading the header or ascii
 			inline constexpr auto f32fmt = "{:.9}";
 			inline constexpr auto f64fmt = "{:.17}";
 		}
@@ -106,19 +106,21 @@ namespace okayply {
 		template<std::uint8_t i>
 		using uintX = std::conditional_t<i == 1, std::uint8_t, std::conditional_t<i == 2,
 			std::uint16_t, std::conditional_t<i == 4, std::uint32_t, std::uint64_t>>>;
-		struct InfoBase {
+		struct ErasedInfoBase {
 			virtual bool isList() const = 0;
 			virtual std::type_index tid() const = 0;
 			virtual std::size_t typeSize() const = 0;
-			virtual std::type_index listTid() const = 0;
+			virtual std::type_index vecTid() const = 0;
 			virtual std::uint8_t listIndexTypeSize(std::any const & any) const = 0;
-			virtual void* ptr(std::any & any) const = 0;
-			virtual const void* ptr(std::any const& any) const = 0;
-			virtual ~InfoBase() = default;
+			virtual void* vecPtr(std::any & any) const = 0; // pointer to vector<T>
+			virtual const void* vecPtr(std::any const& any) const = 0; // pointer to vector<T>
+			virtual void* rawPtr(std::any& any) const = 0; // pointer to element [0] of vector<T>
+			virtual const void* rawPtr(std::any const& any) const = 0; // pointer to element [0] of vector<T>
+			virtual ~ErasedInfoBase() = default;
 		};
 		template<typename T, bool l>
-		struct Info : public InfoBase {
-			std::type_index listTid() const override { return typeid(vec<T>); }
+		struct ErasedInfo : public ErasedInfoBase {
+			std::type_index vecTid() const override { return typeid(vec<T>); }
 			std::type_index tid() const override { return typeid(T); }
 			std::size_t typeSize() const override { return sizeof(T); }
 			bool isList() const override { return l; }
@@ -134,7 +136,7 @@ namespace okayply {
 					return 0;
 				}
 			}
-			void* ptr(std::any & any) const override {
+			void* vecPtr(std::any & any) const override {
 				// It depends on the std::any implementation if this is needed. If
 				// sizeof(vec<T>) fits into the small storage of std::any,
 				// the adresses of &vec<T> and &std::any are equal. If it
@@ -142,9 +144,17 @@ namespace okayply {
 				if constexpr (l) return reinterpret_cast<void*>(&std::any_cast<vec<vec<T>>&>(any));
 				else             return reinterpret_cast<void*>(&std::any_cast<vec<T>&>(any));
 			}
-			const void* ptr(std::any const& any) const override {
+			const void* vecPtr(std::any const& any) const override {
 				if constexpr (l) return reinterpret_cast<const void*>(&std::any_cast<vec<vec<T>>const&>(any));
 				else             return reinterpret_cast<const void*>(&std::any_cast<vec<T>const&>(any));
+			}
+			void* rawPtr(std::any& any) const override {
+				if constexpr (l) return reinterpret_cast<void*>(std::any_cast<vec<vec<T>>&>(any).data());
+				else             return reinterpret_cast<void*>(std::any_cast<vec<T>&>(any).data());
+			}
+			const void* rawPtr(std::any const& any) const override {
+				if constexpr (l) return reinterpret_cast<const void*>(std::any_cast<vec<vec<T>>const&>(any).data());
+				else             return reinterpret_cast<const void*>(std::any_cast<vec<T>const&>(any).data());
 			}
 		};
 		inline std::uint32_t getline(std::istream& in, std::string& line, char & c) {
@@ -154,8 +164,7 @@ namespace okayply {
 			// and with tracking of \r and \n usage
 			std::uint32_t crlf = 0;
 			line.clear();
-			auto sanitize = [&c, &line, &crlf]() {
-				crlf += c == str::cr ? 0x00010000 : 0x00000001; // track how often cr and lf are used
+			auto sanitize = [&c, &line]() {
 				std::size_t start = 0;
 				while (start < line.size() && line[start] == str::space) start++;
 				std::size_t end = std::min(line.find_first_of(str::ignoreLineSymbols), line.size());
@@ -164,6 +173,7 @@ namespace okayply {
 			};
 			while (in.get(c)) {
 				if (c == str::cr || c == str::lf) {
+					crlf += c == str::cr ? 0x00010000 : 0x00000001; // track how often cr and lf are used
 					sanitize();
 					if (!line.size()) continue;
 					return crlf;
@@ -271,7 +281,7 @@ namespace okayply {
 		std::unordered_map<std::type_index, std::function<std::any(std::size_t)>> anyvec_;
 		vec<std::string> comments_;
 		std::unordered_map<std::string, elem> elements_;
-		std::unordered_map<std::type_index, std::unique_ptr<InfoBase>> info_;
+		std::unordered_map<std::type_index, std::unique_ptr<ErasedInfoBase>> info_;
 		std::unordered_map<std::type_index, std::unique_ptr<type>> ios_;
 		std::unordered_map<const elem*, std::string> names_;
 		vec<std::string> order_;
@@ -291,12 +301,12 @@ namespace okayply {
 
 	void* prop::rawPtr() {
 		auto& info = *parent_->parent_->info_[tid_].get();
-		return info.ptr(any_);
+		return info.rawPtr(any_);
 	}
 
 	std::size_t prop::rawSize() {
 		auto& info = *parent_->parent_->info_[tid_].get();
-		return info.typeSize();
+		return info.typeSize() * size();
 	}
 
 	std::size_t prop::size() const { return parent_->size_; }
@@ -389,7 +399,7 @@ namespace okayply {
 			auto const& p = properties_.at(order_[pIdx]);
 			ios[pIdx] = parent_->ios_[p.tid_].get();
 			auto& info = *parent_->info_[p.tid_].get();
-			ptrs[pIdx] = info.ptr(p.any_);
+			ptrs[pIdx] = info.vecPtr(p.any_);
 			lsiz[pIdx] = info.listIndexTypeSize(p.any_);
 		}
 		if constexpr (ff == format::ascii) {
@@ -420,7 +430,7 @@ namespace okayply {
 			auto& p = properties_[order_[pIdx]];
 			ios[pIdx] = parent_->ios_[p.tid_].get();
 			auto& info = *parent_->info_[p.tid_].get();
-			ptrs[pIdx] = info.ptr(p.any_);
+			ptrs[pIdx] = info.vecPtr(p.any_);
 			lsiz[pIdx] = p.listIndexSize_;
 		}
 		if constexpr (ff == format::ascii) {
@@ -495,17 +505,17 @@ namespace okayply {
 
 	template<typename T, template<typename, bool> typename CustomIO> void root::registerType() {
 		ios_.insert({ typeid(T),std::make_unique<CustomIO<T, false>>() });
-		info_.insert({ typeid(T),std::make_unique<Info<T, false>>() });
+		info_.insert({ typeid(T),std::make_unique<ErasedInfo<T, false>>() });
 		anyvec_.insert({ typeid(T), [](std::size_t s) { return vec<T>(s); } });
 		ios_.insert({ typeid(vec<T>),std::make_unique<CustomIO<T, true>>() });
-		info_.insert({ typeid(vec<T>),std::make_unique<Info<T, true>>() });
+		info_.insert({ typeid(vec<T>),std::make_unique<ErasedInfo<T, true>>() });
 		anyvec_.insert({ typeid(vec<T>), [](std::size_t s) { return vec<vec<T>>(s); } });
 	}
 
 	std::type_index root::typeidFromStr(std::string_view s, bool isList) {
 		for (auto const & [tid, ios] : ios_)
 			for (auto& sw : ios->names())
-				if (sw == s) return isList ? info_[tid]->listTid() : tid;
+				if (sw == s) return isList ? info_[tid]->vecTid() : tid;
 		return typeid(void);
 	}
 
@@ -596,14 +606,16 @@ namespace okayply {
 #ifdef USE_CRLF_LFCR_HEADER_HACK
 		auto crlfa = *reinterpret_cast<std::array<std::uint16_t, 2>*>(&crlfCounter);
 		// Problem: per definition "end_header\r" is the end of the header, but many implementations also
-		// use "end_header\n" or "end_header\r\n" (or even "end_header\n\r"... sure). Due to the previous
-		// getline(in, line), one of these was removed, but in the case of crlf/lfcr, one will remain.
-		// if the first byte is now '\r', should we remove it? (it might be part of the data)
-		// if the first byte is now '\n', should we remove it? (it might be part of the data)
-		float ratio = static_cast<float>(crlfa[0]) / (crlfa[0] + crlfa[1]);
-		if (std::abs(ratio - 0.5) < 0.1) { // probably crlf or lfcr was used... maybe....
-			if (lastDecodedChar == str::cr && in.peek() == str::lf) in.get();
-			if (lastDecodedChar == str::lf && in.peek() == str::cr) in.get();
+		// use "end_header\n" or "end_header\r\n" or any amount of \n and \r in any sequence. Why? Noone knows.
+		// we expect that there are (avgNSep - 1) seperators after "end_header" left in the stream because one of them was already consumed via getline
+		// we expect that all the seperators \n and \r are used without any other characters inbetween
+		int avgNSep = static_cast<int>(std::lround((static_cast<float>(crlfa[0]) + static_cast<float>(crlfa[1]) - 1) / lIdx));
+		// if avgNSep is no integer -> inconsistent number of linesep per line
+		for (int i = 1; i < avgNSep; i++) {
+			if ((lastDecodedChar == str::cr || lastDecodedChar == str::lf) && (in.peek() == str::cr || in.peek() == str::lf))
+				in.get(lastDecodedChar);
+			else
+				throw std::runtime_error("inconsistent line seperators in header");
 		}
 #endif
 		if (fmt == format::ascii) {
