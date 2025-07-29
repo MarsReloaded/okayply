@@ -122,23 +122,31 @@ namespace okayply
 			default: throw std::runtime_error("invalid list index type");
 			}
 		}
+
 		template<std::uint8_t i>
-		using uintX = std::conditional_t<i == 1, std::uint8_t, std::conditional_t<i == 2,
-			std::uint16_t, std::conditional_t<i == 4, std::uint32_t, std::uint64_t>>>;
+		using uintX = 
+            std::conditional_t<i == 1, std::uint8_t,
+            std::conditional_t<i == 2, std::uint16_t,
+            std::conditional_t<i == 4, std::uint32_t,
+            std::uint64_t>>>;
 		struct ErasedInfoBase
 		{
-			virtual bool isList() const = 0;
+			virtual bool            isList() const = 0;
 			virtual std::type_index tid() const = 0;
-			virtual std::size_t typeSize() const = 0;
+			virtual std::size_t     typeSize() const = 0;
 			virtual std::type_index vecTid() const = 0;
-			virtual std::uint8_t listIndexTypeSize(std::any const & any) const = 0;
-			virtual void * vecPtr(std::any & any) const = 0; // pointer to vector<T>
-			virtual const void * vecPtr(std::any const & any) const = 0; // pointer to vector<T>
-			virtual void * rawPtr(std::any & any) const = 0; // pointer to element [0] of vector<T>
-			virtual const void * rawPtr(std::any const & any) const = 0; // pointer to element [0] of vector<T>
+			virtual std::uint8_t    listIndexTypeSize(std::any const & any) const = 0;
+			
+            virtual void*           vecPtr(std::any& any) const = 0; // pointer to vector<T>
+			virtual const void*     vecPtr(std::any const & any) const = 0; // pointer to vector<T>
+			
+            virtual void*           rawPtr(std::any& any) const = 0; // pointer to element [0] of vector<T>
+			virtual const void*     rawPtr(std::any const & any) const = 0; // pointer to element [0] of vector<T>
+
 			virtual ~ErasedInfoBase() = default;
 		};
-		template<typename T, bool l>
+
+		template<typename T, bool is_list>
 		struct ErasedInfo : public ErasedInfoBase
 		{
 			std::type_index vecTid() const override
@@ -155,49 +163,69 @@ namespace okayply
 			}
 			bool isList() const override
 			{
-				return l;
+				return is_list;
 			}
-			std::uint8_t listIndexTypeSize(std::any const & any) const override
+			std::uint8_t listIndexTypeSize(
+                std::any const & any) const override
 			{
-				if constexpr(l)
+				if constexpr(is_list)
 				{
 					auto const & vv = std::any_cast<std::vector<std::vector<T>>const &>(any);
 					std::size_t max = 0;
 					for(auto & v : vv)
 						max = std::max(max, v.size());
-					return max < 256 ? 1 : max < 65536 ? 2 : 3;
+					return max < 256
+                        ? 1
+                        : max < 65536
+                            ? 2
+                            : 3;
 				}
-				else if constexpr(!l)
+				else if constexpr(!is_list)
 				{
 					return 0;
 				}
 			}
-			void * vecPtr(std::any & any) const override
+			void* vecPtr(
+                std::any& any) const override
 			{
 				// It depends on the std::any implementation if this is needed. If
 				// sizeof(std::vector<T>) fits into the small storage of std::any,
 				// the adresses of &std::vector<T> and &std::any are equal. If it
 				// does not fit, the vector gets heap allocated and has a different adresss.
-				if constexpr(l) return reinterpret_cast<void *>(&std::any_cast<std::vector<std::vector<T>>&>(any));
-				else             return reinterpret_cast<void *>(&std::any_cast<std::vector<T>&>(any));
+				if constexpr(is_list)
+                    return reinterpret_cast<void*>(&std::any_cast<std::vector<std::vector<T>>&>(any));
+				else
+                    return reinterpret_cast<void*>(&std::any_cast<std::vector<T>&>(any));
 			}
-			const void * vecPtr(std::any const & any) const override
+			const void* vecPtr(
+                const std::any& any) const override
 			{
-				if constexpr(l) return reinterpret_cast<const void *>(&std::any_cast<std::vector<std::vector<T>>const &>(any));
-				else             return reinterpret_cast<const void *>(&std::any_cast<std::vector<T>const &>(any));
+				if constexpr(is_list)
+                    return reinterpret_cast<const void*>(&std::any_cast<std::vector<std::vector<T>>const &>(any));
+				else
+                    return reinterpret_cast<const void*>(&std::any_cast<std::vector<T>const &>(any));
 			}
-			void * rawPtr(std::any & any) const override
+			void* rawPtr(
+                std::any& any) const override
 			{
-				if constexpr(l) return reinterpret_cast<void *>(std::any_cast<std::vector<std::vector<T>>&>(any).data());
-				else             return reinterpret_cast<void *>(std::any_cast<std::vector<T>&>(any).data());
+				if constexpr(is_list)
+                    return reinterpret_cast<void*>(std::any_cast<std::vector<std::vector<T>>&>(any).data());
+				else
+                    return reinterpret_cast<void*>(std::any_cast<std::vector<T>&>(any).data());
 			}
-			const void * rawPtr(std::any const & any) const override
+			const void* rawPtr(
+                const std::any& any) const override
 			{
-				if constexpr(l) return reinterpret_cast<const void *>(std::any_cast<std::vector<std::vector<T>>const &>(any).data());
-				else             return reinterpret_cast<const void *>(std::any_cast<std::vector<T>const &>(any).data());
+				if constexpr(is_list)
+                    return reinterpret_cast<const void*>(std::any_cast<std::vector<std::vector<T>>const &>(any).data());
+				else
+                    return reinterpret_cast<const void*>(std::any_cast<std::vector<T>const &>(any).data());
 			}
 		};
-		inline std::uint32_t getline(std::istream & in, std::string & line, char & c)
+		inline std::uint32_t getline(
+            std::istream& in,
+            std::string& line,
+            char& c)
 		{
 			// getline with \r and \n (or both) as line seperators
 			// and without leading and trailing whitespace
@@ -205,28 +233,39 @@ namespace okayply
 			// and with tracking of \r and \n usage
 			std::uint32_t crlf = 0;
 			line.clear();
-			auto sanitize = [&c, &line] () {
+
+			auto sanitize = [&character, &line] () {
 				std::size_t start = 0;
-				while(start < line.size() && line[start] == str::space) start++;
+				while(start < line.size() && line[start] == str::space)
+                    start++;
+
 				std::size_t end = std::min(line.find_first_of(str::ignoreLineSymbols), line.size());
-				while(end > start && line[end - 1] == str::space) end--;
+				while(end > start && line[end - 1] == str::space)
+                    end--;
+
 				line = line.substr(start, end - start);
 			};
-			while(in.get(c))
+
+			while(in.get(character))
 			{
-				if(c == str::cr || c == str::lf)
+				if(character == str::cr || character == str::lf)
 				{
-					crlf += c == str::cr ? 0x00010000 : 0x00000001; // track how often cr and lf are used
+					crlf += character == str::cr
+                        ? 0x00010000
+                        : 0x00000001; // track how often cr and lf are used
 					sanitize();
-					if(!line.size()) continue;
+					if(!line.size())
+                        continue;
 					return crlf;
 				}
-				line += c;
+				line += character;
 			}
 			sanitize();
 			return crlf;
 		}
-		inline std::vector<std::string> split(std::string const & s, char delim)
+		inline std::vector<std::string> split(
+            const std::string& s,
+            char delim)
 		{
 			std::vector<std::string> r;
 			std::stringstream ss(s);
@@ -244,10 +283,26 @@ namespace okayply
 	struct type
 	{
 		// Serialize & Deserialize
-		virtual void ascI(std::istream &, void *, std::size_t) const = 0;
-		virtual void ascO(std::ostream &, const void *, std::size_t) const = 0;
-		virtual void binI(std::istream &, void *, std::size_t, std::uint8_t, bool) const = 0;
-		virtual void binO(std::ostream &, const void *, std::size_t, std::uint8_t, bool) const = 0;
+		virtual void ascI(
+            std::istream&,
+            void*,
+            std::size_t) const = 0;
+		virtual void ascO(
+            std::ostream&,
+            const void*,
+            std::size_t) const = 0;
+		virtual void binI(
+            std::istream&,
+            void*,
+            std::size_t,
+            std::uint8_t,
+            bool) const = 0;
+		virtual void binO(
+            std::ostream&,
+            const void*,
+            std::size_t,
+            std::uint8_t,
+            bool) const = 0;
 
 		// First name will be used when writing, all names are valid for reading
 		virtual std::vector<std::string_view> names() const = 0;
@@ -260,81 +315,197 @@ namespace okayply
 	{
 		friend root; // friends are nice.
 		friend elem;
-		std::size_t size() const; // how many datapoints are in the property?
-		std::string_view name() const; // whats my name?
-		template<typename T> std::span<T> get(); // mutable data access
-		template<typename T> void set(std::span<T const>); // set data
-		template<typename T> void set(std::vector<T> const &); // set data
-		std::type_index type() const; // gets the type of the property
-		std::type_index listType() const; // for lists, this is std::vector<type>, for non lists, this is equal to type()
-		bool isList() const; // is true if the property is a property list
-		void * rawPtr(); // start adress of data
-		std::size_t rawSize(); // data size in bytes
+
+        // how many datapoints are in the property?
+		std::size_t size() const;
+
+        // whats my name?
+		std::string_view name() const;
+
+        // mutable data access
+		template<typename T> std::span<T> get();
+
+        // set data
+		template<typename T> void set(std::span<T const>);
+		template<typename T> void set(std::vector<T> const &);
+
+        // gets the type of the property
+		std::type_index type() const;
+
+        // for lists, this is std::vector<type>, for non lists, this is equal to type()
+		std::type_index listType() const;
+
+         // is true if the property is a property list
+		bool isList() const;
+
+        // start adress of data
+		void* rawPtr();
+
+        // data size in bytes
+		std::size_t rawSize();
+
 	private:
-		std::any data_;
-		elem * parent_ = nullptr;
+		std::any        data_;
+		elem*           parent_ = nullptr;
 		std::type_index tid_ = typeid(void);
-		std::uint8_t listIndexSize_ = 0; // only used when reading files
+		std::uint8_t    listIndexSize_ = 0; // only used when reading files
 	};
 
 	struct elem
 	{
 		friend root;
 		friend prop;
-		prop & operator()(std::span<std::string_view const>); // access only, returns element that matches the earliest name in the list
-		prop & operator()(std::string_view, std::type_index const &); // full initialisation
-		prop & operator()(std::string_view); // partial initialisation (full after first Property.get<T>())
-		bool has(std::string_view) const; // check if property exists
-		std::size_t size() const; // get the number of elements
-		std::string_view name() const; // get the name of the element
-		std::vector<std::reference_wrapper<prop>> properties(); // get all the properties from this element
-		std::vector<std::string> names() const; // get all names of the properties
-		void del(std::string_view); // delete a property by name
+
+        // access only, returns element that matches the earliest name in the list
+		prop& operator()(
+            std::span<const std::string_view>);
+		// full initialisation
+        prop& operator()(
+            std::string_view,
+            const std::type_index&);
+        // partial initialisation (full after first Property.get<T>())
+		prop& operator()(
+            std::string_view);
+        
+        // check if property exists
+		bool has(std::string_view) const;
+        
+        // get the number of elements
+		std::size_t size() const;
+        
+        // get the name of the element
+		std::string_view name() const;
+        
+        // get all the properties from this element
+		std::vector<std::reference_wrapper<prop>> properties();
+        
+        // get all names of the properties
+		std::vector<std::string> names() const;
+        
+        // delete a property by name
+		void del(std::string_view);
+
 	private:
-		template<format ff = format::ascii, std::endian ee = std::endian::native>
+		template<
+            format ff = format::ascii,
+            std::endian ee = std::endian::native>
 		void read(std::istream &);
-		template<format ff = format::ascii, std::endian ee = std::endian::native>
+
+		template<
+            format ff = format::ascii,
+            std::endian ee = std::endian::native>
 		void write(std::ostream &) const;
-		std::unordered_map<const prop *, std::string> names_;
-		std::vector<std::string> order_;
-		root * parent_ = nullptr;
-		std::unordered_map<std::string, prop> properties_;
-		std::size_t size_ = 0;
+
+		std::unordered_map<
+            const prop*,
+            std::string>            names_;
+		std::vector<std::string>    order_;
+		root*                       parent_ = nullptr;
+
+		std::unordered_map<
+            std::string,
+            prop>                   properties_;
+
+		std::size_t                 size_ = 0;
 	};
 
 	struct root
 	{
 		friend elem;
 		friend prop;
+
 		root();
-		elem & operator()(std::string_view, std::size_t); // full init
-		elem & operator()(std::string_view); // access only after init
-		elem const & operator()(std::string_view) const; // const access
-		std::vector<std::string> & comments(); // get all the comments and manage them yourself
-		void read(std::istream &); // load a file (do not forget std::ios::binary!)
-		void read(std::string const &); // load a file
-		template<typename T, template<typename, bool> typename CustomIO> void registerType(); // add a custom datatype
-		template<format ff = format::ascii, std::endian ee = std::endian::native>
-		void write(std::ostream &) const; // write a file
-		template<format ff = format::ascii, std::endian ee = std::endian::native>
-		void write(std::string const &) const; // write a file
-		std::string str() const; // get ascii representation of the ply
-		char lineSeperator(char); // old line seperator = lineSeperator(new line seperator)
-		std::vector<std::reference_wrapper<elem>> elements(); // get all the elements
-		std::vector<std::string> names() const; // get all element names
-		void del(std::string_view); // delete an element by name
-		bool has(std::string_view) const; // check if element exists
-		bool has(std::string_view, std::string_view) const; // check if element with property exists
+
+        // full init
+		elem& operator()(
+            std::string_view,
+            std::size_t);
+        // access only after init
+		elem& operator()(
+            std::string_view);
+        // const access
+		const elem& operator()(
+            std::string_view) const;
+
+        // get all the comments and manage them yourself
+		std::vector<std::string>& comments();
+
+        // load a file (do not forget std::ios::binary!)
+		void read(
+            std::istream&);
+        // load a file
+		void read(
+            const std::string&);
+        
+        // add a custom datatype
+		template<
+            typename T,
+            template<typename, bool> typename CustomIO>
+        void registerType();
+		
+        // write a file to utput stream
+        template<
+            format ff = format::ascii,
+            std::endian ee = std::endian::native>
+		void write(
+            std::ostream &) const;
+
+        // write a file
+		template<
+            format ff = format::ascii,
+            std::endian ee = std::endian::native>
+        void write(
+            const std::string&) const;
+		
+        // get ascii representation of the ply
+        std::string str() const;
+		
+        // old line seperator = lineSeperator(new line seperator)
+        char lineSeperator(char);
+		
+        // get all the elements
+        std::vector<std::reference_wrapper<elem>> elements();
+		
+        // get all element names
+        std::vector<std::string> names() const;
+		
+        // delete an element by name
+        void del(std::string_view);
+		
+        // check if element exists
+        bool has(std::string_view) const;
+		
+        // check if element with property exists
+        bool has(
+            std::string_view,
+            std::string_view) const;
+
 	private:
-		std::type_index typeidFromStr(std::string_view, bool);
-		std::unordered_map<std::type_index, std::function<std::any(std::size_t)>> anyvec_;
-		std::vector<std::string> comments_;
-		std::unordered_map<std::string, elem> elements_;
-		std::unordered_map<std::type_index, std::unique_ptr<internal::ErasedInfoBase>> info_;
-		std::unordered_map<std::type_index, std::unique_ptr<type>> ios_;
-		std::unordered_map<const elem *, std::string> names_;
-		std::vector<std::string> order_;
-		char linesep_ = str::lf;
+		std::type_index typeidFromStr(
+            std::string_view,
+            bool);
+		
+        char linesep_ = str::lf;
+
+        std::unordered_map<
+            std::type_index,
+            std::function<
+                std::any(std::size_t)>>     anyvec_;
+		std::vector<std::string>            comments_;
+		std::unordered_map<
+            std::string,
+            elem>                           elements_;
+		std::unordered_map<
+            std::type_index,
+            std::unique_ptr<
+                internal::ErasedInfoBase>>  info_;
+		std::unordered_map<
+            std::type_index,
+            std::unique_ptr<type>>          ios_;
+		std::unordered_map<
+            const elem*,
+            std::string>                    names_;
+		std::vector<std::string>            order_;		
 	};
 
 	// ---------------------------------------------------------------
@@ -357,7 +528,7 @@ namespace okayply
 		return info;
 	}
 
-	void * prop::rawPtr()
+	void* prop::rawPtr()
 	{
 		auto & info = *parent_->parent_->info_[tid_].get();
 		return info.rawPtr(data_);
@@ -497,7 +668,7 @@ namespace okayply
 	{
 		std::size_t np = order_.size();
 		std::vector<const type *> ios(np); // serializer & deserializer for each property
-		std::vector<const void *> ptrs(np); // ptr on the vectors (NOT the data)
+		std::vector<const void*> ptrs(np); // ptr on the vectors (NOT the data)
 		std::vector<std::uint8_t> lsiz(np); // list index type sizes
 		for(std::size_t pIdx = 0; pIdx < np; pIdx++)
 		{
@@ -534,7 +705,7 @@ namespace okayply
 	{
 		std::size_t np = order_.size();
 		std::vector<const type *> ios(np); // serializer & deserializer for each property
-		std::vector<void *> ptrs(np); // ptr on the vectors (NOT the data)
+		std::vector<void*> ptrs(np); // ptr on the vectors (NOT the data)
 		std::vector<std::uint8_t> lsiz(np); // list index type sizes
 		for(std::size_t pIdx = 0; pIdx < np; pIdx++)
 		{
@@ -896,7 +1067,7 @@ namespace okayply
 		template<typename T, bool isList>
 		struct type_x : public type
 		{
-			void ascI(std::istream & in, void * ptr, std::size_t i) const override
+			void ascI(std::istream & in, void* ptr, std::size_t i) const override
 			{
 				if constexpr(isList)
 				{
@@ -932,7 +1103,7 @@ namespace okayply
 						in >> v[i];
 				}
 			}
-			void ascO(std::ostream & out, const void * ptr, std::size_t i) const override
+			void ascO(std::ostream & out, const void* ptr, std::size_t i) const override
 			{
 				if constexpr(isList)
 				{
@@ -962,7 +1133,7 @@ namespace okayply
 						out << v[i];
 				}
 			}
-			void binI(std::istream & in, void * ptr, std::size_t i, std::uint8_t listIndexTypeSize, bool swapEndian) const override
+			void binI(std::istream & in, void* ptr, std::size_t i, std::uint8_t listIndexTypeSize, bool swapEndian) const override
 			{
 				if constexpr(isList)
 				{
@@ -993,7 +1164,7 @@ namespace okayply
 					read(in, v[i], swapEndian);
 				}
 			}
-			void binO(std::ostream & out, const void * ptr, std::size_t i, std::uint8_t listIndexTypeSize, bool swapEndian) const override
+			void binO(std::ostream & out, const void* ptr, std::size_t i, std::uint8_t listIndexTypeSize, bool swapEndian) const override
 			{
 				if constexpr(isList)
 				{
