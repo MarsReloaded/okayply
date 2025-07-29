@@ -271,7 +271,7 @@ namespace okayply
 		void * rawPtr(); // start adress of data
 		std::size_t rawSize(); // data size in bytes
 	private:
-		std::any any_;
+		std::any data_;
 		elem * parent_ = nullptr;
 		std::type_index tid_ = typeid(void);
 		std::uint8_t listIndexSize_ = 0; // only used when reading files
@@ -360,7 +360,7 @@ namespace okayply
 	void * prop::rawPtr()
 	{
 		auto & info = *parent_->parent_->info_[tid_].get();
-		return info.rawPtr(any_);
+		return info.rawPtr(data_);
 	}
 
 	std::size_t prop::rawSize()
@@ -386,12 +386,12 @@ namespace okayply
 				tid_ = typeid(T);
 				auto & f = parent_->parent_->anyvec_[tid_];
 				if(!f) throw std::runtime_error(std::format("Unknown type: \"{}\" (size = {})", typeid(T).name(), sizeof(T)));
-				any_ = f(parent_->size_);
+				data_ = f(parent_->size_);
 			}
 			else
 				throw std::runtime_error(std::format("Property::get<{}> is incompatible to the stored type \"{}\"", typeid(T).name(), tid_.name()));
 		}
-		return std::any_cast<std::vector<T> &>(any_);
+		return std::any_cast<std::vector<T> &>(data_);
 	}
 	template<typename T> void prop::set(std::span<T const> src)
 	{
@@ -449,7 +449,7 @@ namespace okayply
 			order_.push_back(std::string(name));
 			names_[&it->second] = std::string(name);
 			it->second.parent_ = this;
-			it->second.any_ = parent_->anyvec_[tid](size_);
+			it->second.data_ = parent_->anyvec_[tid](size_);
 			it->second.tid_ = tid;
 		}
 		return it->second;
@@ -504,8 +504,8 @@ namespace okayply
 			auto const & p = properties_.at(order_[pIdx]);
 			ios[pIdx] = parent_->ios_[p.tid_].get();
 			auto & info = *parent_->info_[p.tid_].get();
-			ptrs[pIdx] = info.vecPtr(p.any_);
-			lsiz[pIdx] = info.listIndexTypeSize(p.any_);
+			ptrs[pIdx] = info.vecPtr(p.data_);
+			lsiz[pIdx] = info.listIndexTypeSize(p.data_);
 		}
 		if constexpr(ff == format::ascii)
 		{
@@ -541,7 +541,7 @@ namespace okayply
 			auto & p = properties_[order_[pIdx]];
 			ios[pIdx] = parent_->ios_[p.tid_].get();
 			auto & info = *parent_->info_[p.tid_].get();
-			ptrs[pIdx] = info.vecPtr(p.any_);
+			ptrs[pIdx] = info.vecPtr(p.data_);
 			lsiz[pIdx] = p.listIndexSize_;
 		}
 		if constexpr(ff == format::ascii)
@@ -839,7 +839,7 @@ namespace okayply
 				auto const & type = *ios_.at(p.tid_).get();
 				auto const & info = *info_.at(p.tid_).get();
 				out << str::prop << " ";
-				if(info.isList()) out << str::list << " " << internal::listIndexTypeName(info.listIndexTypeSize(p.any_)) << " ";
+				if(info.isList()) out << str::list << " " << internal::listIndexTypeName(info.listIndexTypeSize(p.data_)) << " ";
 				out << type.names()[0] << " " << p.name() << linesep_;
 			}
 		}
