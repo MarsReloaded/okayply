@@ -225,7 +225,7 @@ namespace okayply
 		inline std::uint32_t getline(
             std::istream& in,
             std::string& line,
-            char& c)
+            char& character)
 		{
 			// getline with \r and \n (or both) as line seperators
 			// and without leading and trailing whitespace
