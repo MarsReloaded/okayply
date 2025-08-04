@@ -6,32 +6,9 @@
 // 
 // Alpha Version 1.1
 // 
-// license: UNLICENSED
-// 
-// Copyright(C) 2025 MarsReloaded
-// 
-// This file is part of the okayply project.
-// 
-// The okayply project cannot be copied, modified and/or distributed
-// without the express permission of MarsReloaded. You are allowed to
-// admire the code though.
+// license: MIT, see okayply/LICENSE
 // 
 // ----------------------------------------------
-
-// ----------------------------------------------
-// Added (28.07.2025)
-// root::names() -> all names of all elements
-// elem::names() -> all names of all properties
-// elem::operator()(std::span<std::string_view const>) -> gets the first matching element
-// e.g. elem::(std::span<sv> = {"vertex", "vertices", "node"}): loads "vertices" if "vertices" is the first existing element.
-// root::has(std::string_view, std::string_view) -> check if element with property exists
-// ----------------------------------------------
-
-// ----------------------------------------------
-// TODO
-// -> composite types -> e.g. "normal" = "nx", "ny, "nz" as float
-// -> custom types    -> e.g. std::array<float, 3> -> property list uchar float name
-// -> better errors
 
 #include <unordered_map>
 #include <string_view>
@@ -1223,3 +1200,4 @@ namespace okayply
 	}
 
 }
+
